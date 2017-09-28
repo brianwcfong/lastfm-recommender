@@ -1,0 +1,59 @@
+---
+title: "Tagging Prediction"
+author: "Brian"
+date: "September 28, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1) SQL Clickstream Query (MySQL)
+Find the count of users who install the app (i.e. with FIRST_INSTALL event) on 2017-04-01 and use our app at least once (i.e. with any event) between 2017-04-02 and 2017-04-08.
+Table name: piwik_track
+- Table fields:
+- uid [string]: Unique ID of user
+- time [datetime]: The time when we receive the event
+- event_name string ENUM { FIRST_INSTALL, ... } type of event
+```{r Clickstream Query SQL}
+
+#SELECT COUNT(DISTINCT uid) AS usercount
+#FROM piwik_track
+#WHERE 
+#  (DATE(time) = '2017-04-01' AND event_name LIKE '%FIRST_INSTALL%') AND
+#  (DATE(time) BETWEEN '2017-04-02' AND '2017-04-08')
+
+SELECT COUNT(DISTINCT uid) AS usercount
+FROM (
+      SELECT uid, time, event_name
+        FROM piwik_track
+        WHERE
+            (DATE(time) BETWEEN '2017-04-02' AND '2017-04-08') AND
+            (event_name NOT LIKE '%FIRST_INSTALL%')
+    )
+WHERE
+    (DATE(time) = '2017-04-01' AND event_name LIKE '%FIRST_INSTALL%') 
+```
+
+
+# 2) Raw Data Analytics (R)
+Count the total data transfer (namely the sum of the file size of individual request) caused by JPEG files (i.e. URI ends with jpg) from 24th Aug to 25th Aug
+```{r Raw Data Analytics}
+library(dplyr)
+library(lubridate)
+
+df <- read.table("./logfile.txt", sep="\t", header=TRUE, stringsAsFactors = FALSE)
+df$date <- ymd(df$date)
+
+df %>%  filter(date >= "2017-08-24" & date <= "2017-08-25") %>% filter(grepl(".jpg$",url)) %>% select(size) %>% sum()
+# [1] 85251
+```
+
+# 3) Tagging Prediction (R)
+```{r pressure, echo=FALSE}
+library(tidyverse)
+
+train <- read.csv("./offsite-tagging-training-set.csv", stringsAsFactors = FALSE, header = TRUE, sep=",", encoding = "UTF-8")
+
+```
