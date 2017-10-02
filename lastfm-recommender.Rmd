@@ -1,0 +1,197 @@
+---
+title: "Last.fm Recommender"
+author: "Brian"
+date: "September 28, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1) SQL Clickstream Query (MySQL)
+Find the count of users who install the app (i.e. with FIRST_INSTALL event) on 2017-04-01 and use our app at least once (i.e. with any event) between 2017-04-02 and 2017-04-08.
+Table name: piwik_track
+- Table fields:
+- uid [string]: Unique ID of user
+- time [datetime]: The time when we receive the event
+- event_name string ENUM { FIRST_INSTALL, ... } type of event
+```{r Clickstream Query SQL}
+
+#SELECT COUNT(DISTINCT uid) AS usercount
+#FROM piwik_track
+#WHERE 
+#  (DATE(time) = '2017-04-01' AND event_name LIKE '%FIRST_INSTALL%') AND
+#  (DATE(time) BETWEEN '2017-04-02' AND '2017-04-08')
+
+SELECT COUNT(DISTINCT uid) AS usercount
+FROM (
+      SELECT uid, time, event_name
+        FROM piwik_track
+        WHERE
+            (DATE(time) BETWEEN '2017-04-02' AND '2017-04-08') AND
+            (event_name NOT LIKE '%FIRST_INSTALL%')
+    )
+WHERE
+    (DATE(time) = '2017-04-01' AND event_name LIKE '%FIRST_INSTALL%') 
+```
+
+# Libraries for R
+```{r}
+library(dplyr)
+library(lubridate)
+library(tidyverse)
+library(knitr)
+library(wordcloud)
+```
+
+
+# 2) Raw Data Analytics (R)
+Count the total data transfer (namely the sum of the file size of individual request) caused by JPEG files (i.e. URI ends with jpg) from 24th Aug to 25th Aug
+```{r Raw Data Analytics}
+
+
+df <- read.table("./logfile.txt", sep="\t", header=TRUE, stringsAsFactors = FALSE)
+df$date <- ymd(df$date)
+
+df %>%  filter(date >= "2017-08-24" & date <= "2017-08-25") %>% filter(grepl(".jpg$",url)) %>% select(size) %>% sum()
+# [1] 85251
+```
+
+# 3) Last.fm Recommendation Engine (R)
+```{r pressure, echo=FALSE}
+#train <- read.csv("./offsite-tagging-training-set.csv", #stringsAsFactors = FALSE, header = TRUE, sep=",", encoding = "UTF-8")
+
+# Read profile and plays TSV data
+
+profile <- read.table("./lastfm-dataset-360K/usersha1-profile.tsv", sep="\t", header=FALSE, stringsAsFactors = FALSE)
+colnames(profile) <- c("userid","gender","age","country","signup")
+
+playcount <- read.table("./lastfm-dataset-360K/usersha1-artmbid-artname-plays.tsv", sep="\t", fill=TRUE, quote="", stringsAsFactors = FALSE)
+colnames(playcount) <- c("userid","artistid","artist","plays")
+
+```
+
+Wordcloud visualization for male and female
+```{r}
+x <- merge(playcount, profile, all.x=TRUE, by.x="userid", by.y="userid")
+
+female <- x %>% filter(gender=="f")
+
+female.aggr <- aggregate(plays ~ artist, female, sum)
+female.aggr <- female.aggr[order(-female.aggr$plays),]
+female.aggr[,"female_rank"] <- rank(-female.aggr$plays, ties.method="first")
+
+male <- x %>% filter(gender=="m")
+
+male.aggr <- aggregate(plays ~ artist, male, sum)
+male.aggr <- male.aggr[order(-male.aggr$plays),]
+male.aggr[,"male_rank"] <- rank(-male.aggr$plays, ties.method="first")
+
+
+plot.female <- wordcloud(female.aggr$artist, female.aggr$plays, max.words=100)
+plot.male <- wordcloud(male.aggr$artist, male.aggr$plays, max.words=100)
+
+z <- merge(male.aggr, female.aggr, all.x=TRUE, all.y=TRUE, by.x="artist", by.y="artist")
+z <- z[order(-z$plays.x),]
+kable(head(z, 50))
+# As seen in the Top 50 artists, males and females have different tastes in music
+```
+
+# Attempt at Recommender with raw data for female users
+```{r}
+library(recommenderlab)
+library(reshape2)
+
+# Looking at number of female users and how many artists they listen to
+length(unique(female$userid))
+# [1] 1328 unique female users
+length(unique(female$artistid))
+# [1] 15091 unique artists
+
+# No. of rows with empty artistid, and remove them
+nrow(female[female$artistid == "",])
+# [1] 837
+female <- female %>% filter(artistid != "")
+
+# No. of rows with empty artist, and remove them
+nrow(female[female$artist == "",])
+# [1] 5
+female <- female %>% filter(artist != "")
+
+# Transform data to user/artist matrix
+female.matrix <- acast(female, userid ~ artistid, fun.aggregate=sum, value.var="plays")
+# Double check if matrix has correct dimensions
+nrow(female.matrix)
+# [1] 1328 = total unique users
+ncol(female.matrix)
+# [1] 15089 = total unique artists
+
+sum(female$plays, na.rm=TRUE)
+# [1] 12783183 = total plays in dataframe
+sum(female.matrix, na.rm=TRUE)
+# [1] 12783183 = total plays in matrix
+
+# Transform into realRatingMatrix for recommenderlab
+female.real.matrix <- as(female.matrix,"realRatingMatrix")
+
+# Normalize plays
+female.real.matrix2 <- normalize(female.real.matrix, method="Z-score")
+
+rec.model <-Recommender(female.real.matrix, method = "UBCF", param=list(normalize = "Z-score",method="Cosine",nn=5, minRating=1))
+
+as(predict(rec.model, female.real.matrix["00000c289a1829a808ac09c00daf10bc3c4e223b",], n=5), "list")
+```
+
+```{r}
+library(recommenderlab)
+library(reshape2)
+
+# Looking at number of plays users and how many artists they listen to
+length(unique(playcount$userid))
+# [1] 8875 unique plays users
+length(unique(playcount$artistid))
+# [1] 46551 unique artists
+
+# No. of rows with empty artistid, and remove them
+nrow(playcount[playcount$artistid == "",])
+# [1] 837
+playcount <- playcount %>% filter(artistid != "")
+
+# No. of rows with empty artist, and remove them
+nrow(playcount[playcount$artist == "",])
+# [1] 5
+playcount <- playcount %>% filter(artist != "")
+
+# Transform data to user/artist matrix
+playcount.matrix <- acast(playcount, userid ~ artistid, fun.aggregate=sum, value.var="plays")
+# Double check if matrix has correct dimensions
+nrow(playcount.matrix)
+# [1] 1328 = total unique users
+ncol(playcount.matrix)
+# [1] 15089 = total unique artists
+
+sum(playcount$plays, na.rm=TRUE)
+# [1] 12783183 = total plays in dataframe
+sum(playcount.matrix, na.rm=TRUE)
+# [1] 12783183 = total plays in matrix
+
+# Transform into realRatingMatrix for recommenderlab
+playcount.real.matrix<- as(playcount.matrix,"realRatingMatrix")
+
+rec.model <-Recommender(playcount.real.matrix, method = "UBCF")
+
+predicted <- predict(rec.model, playcount.real.matrix[1,], n=5)
+as(predicted, "list")
+```
+```
+
+```{r}
+z <- aggregate(plays ~ userid, playcount, sum)
+z <- z[order(-plays),]
+
+z1 <- head(z, 500)
+z2 <- as.vector(z1$userid)
+
+```
+
