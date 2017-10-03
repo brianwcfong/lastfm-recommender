@@ -18,7 +18,7 @@ Table name: piwik_track
 - event_name string ENUM { FIRST_INSTALL, ... } type of event
 
 The database used for this query was MySQL
-```{r Clickstream Query MySQL}
+```{r Clickstream Query MySQL, eval=FALSE}
 
 # CREATE DATABASE testdb;
 # USE testdb;
