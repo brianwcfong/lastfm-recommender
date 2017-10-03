@@ -43,6 +43,9 @@ library(lubridate)
 library(tidyverse)
 library(knitr)
 library(wordcloud)
+library(recommenderlab)
+library(reshape2)
+library(shiny)
 ```
 
 
@@ -77,7 +80,10 @@ x <- merge(playcount, profile, all.x=TRUE, by.x="userid", by.y="userid")
 female <- x %>% filter(gender=="f")
 #male <- x %>% filter(gender=="m")
 
+## Create dimension table for unique artists
+uniqueartists <- x %>% select(artistid, artist) %>% unique() %>% as.data.frame() %>% filter(artistid != "")
 
+unique_users <- unique(female$userid)
 
 ```
 
@@ -104,9 +110,6 @@ kable(head(z, 50))
 
 # Attempt at Recommender with raw data for female users
 ```{r}
-library(recommenderlab)
-library(reshape2)
-
 # Looking at number of female users and how many artists they listen to
 length(unique(female$userid))
 # [1] 1328 unique female users
@@ -147,12 +150,12 @@ female.real <- as(female.matrix,"realRatingMatrix")
 
 rec.model <-Recommender(female.real, method = "UBCF", param=list(normalize = "center",method="Cosine",nn=50))
 
-as(predict(rec.model, female.real["00000c289a1829a808ac09c00daf10bc3c4e223b",], n=5), "list")
+as.data.frame(as(predict(rec.model, female.real["00000c289a1829a808ac09c00daf10bc3c4e223b",], n=10), "list"))
 ```
 
 ```{r}
-library(recommenderlab)
-library(reshape2)
+# Unique User ID List
+unique_users <- unique(playcount$userid)
 
 # Looking at number of plays users and how many artists they listen to
 length(unique(playcount$userid))
@@ -191,6 +194,12 @@ rec.model <-Recommender(playcount.real.matrix, method = "UBCF")
 predicted <- predict(rec.model, playcount.real.matrix[1,], n=5)
 as(predicted, "list")
 ```
+
+```{r}
+
+```
+
+
 
 ```{r}
 z <- aggregate(plays ~ userid, playcount, sum)
