@@ -9,35 +9,48 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# 1) SQL Clickstream Query (MySQL)
+## 1) SQL Clickstream Query (MySQL)
 Find the count of users who install the app (i.e. with FIRST_INSTALL event) on 2017-04-01 and use our app at least once (i.e. with any event) between 2017-04-02 and 2017-04-08.
 Table name: piwik_track
 - Table fields:
 - uid [string]: Unique ID of user
 - time [datetime]: The time when we receive the event
 - event_name string ENUM { FIRST_INSTALL, ... } type of event
-```{r Clickstream Query SQL}
 
-#SELECT COUNT(DISTINCT uid) AS usercount
-#FROM piwik_track
-#WHERE 
-#  (DATE(time) = '2017-04-01' AND event_name LIKE '%FIRST_INSTALL%') AND
-#  (DATE(time) BETWEEN '2017-04-02' AND '2017-04-08')
+The database used for this query was MySQL
+```{r Clickstream Query MySQL}
 
-SELECT COUNT(DISTINCT uid) AS usercount
-FROM (
-      SELECT uid, time, event_name
-        FROM piwik_track
-        WHERE
-            (DATE(time) BETWEEN '2017-04-02' AND '2017-04-08') AND
-            (event_name NOT LIKE '%FIRST_INSTALL%')
-    )
-WHERE
-    (DATE(time) = '2017-04-01' AND event_name LIKE '%FIRST_INSTALL%') 
+# CREATE DATABASE testdb;
+# USE testdb;
+
+#create table piwik_track
+#(
+#time datetime,
+#uid varchar(256),
+#event_name varchar(256),
+#source_ip varchar(50),
+#);
+
+SELECT COUNT(DISTINCT uid)
+      AS usercount
+      FROM piwik_track
+      WHERE 
+	       	  (uid IN
+			          (SELECT uid
+			           FROM piwik_track
+			           WHERE (DATE(time) = '2017-04-01' AND event_name LIKE '%FIRST_INSTALL%')
+		           	)
+	         	) AND
+	        	(DATE(time) BETWEEN '2017-04-02' AND '2017-04-08') AND
+	        	(event_name NOT LIKE '%FIRST_INSTALL%')
+;
+      
+# usercount
+# 5
 ```
 
 # Libraries for R
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(dplyr)
 library(lubridate)
 library(tidyverse)
@@ -46,11 +59,14 @@ library(wordcloud)
 library(recommenderlab)
 library(reshape2)
 library(shiny)
+library(RColorBrewer)
 ```
 
 
-# 2) Raw Data Analytics (R)
+## 2) Raw Data Analytics (R)
 Count the total data transfer (namely the sum of the file size of individual request) caused by JPEG files (i.e. URI ends with jpg) from 24th Aug to 25th Aug
+
+R was used for this example, and the data from the PDF was used for "logfile.txt"
 ```{r Raw Data Analytics}
 
 
@@ -61,12 +77,19 @@ df %>%  filter(date >= "2017-08-24" & date <= "2017-08-25") %>% filter(grepl(".j
 # [1] 85251
 ```
 
-# 3) Last.fm Recommendation Engine (R)
+## 3) Last.fm Recommendation Engine (R)
+
+A recommendation engine was created in R for the Last.fm 360k dataset, featuring users profiles and playcounts of artists for those users. 
+
+The goal of this recommendation engine is to recommend similar artists to users, based on their existing artist preferences - this is estimated by observing the number of plays each user has for each artist. Only the female users were considered for this recommendation engine to limit the scope of the engine, and because the listening preferences of males and females differ significantly in this dataset.
+
+To run this recommendation engine code, please run all chunks below in the current file "lastfm-recommender.Rmd" in RStudio to execute the recommendation engine (User Based Collaborative Filtering), and then run the Shiny app.R found in the "user_recommender" folder for a rough prototype of the UI of the recommender.
+
+# Loading data from Last.fm dataset
+Load TSV files from http://www.dtic.upf.edu/~ocelma/MusicRecommendationDataset/lastfm-360K.html, placed in the root of this git project
 ```{r pressure, echo=FALSE}
-#train <- read.csv("./offsite-tagging-training-set.csv", #stringsAsFactors = FALSE, header = TRUE, sep=",", encoding = "UTF-8")
 
-# Read profile and plays TSV data
-
+# Read profile and playcount TSV data
 profile <- read.table("./lastfm-dataset-360K/usersha1-profile.tsv", sep="\t", header=FALSE, stringsAsFactors = FALSE)
 colnames(profile) <- c("userid","gender","age","country","signup")
 
@@ -74,40 +97,58 @@ playcount <- read.table("./lastfm-dataset-360K/usersha1-artmbid-artname-plays.ts
 colnames(playcount) <- c("userid","artistid","artist","plays")
 
 ## Merge profile and playcount
-x <- merge(playcount, profile, all.x=TRUE, by.x="userid", by.y="userid")
+full <- merge(playcount, profile, all.x=TRUE, by.x="userid", by.y="userid")
 
 ## Create Male/Female datasets from playcount
-female <- x %>% filter(gender=="f")
-#male <- x %>% filter(gender=="m")
+female <- full %>% filter(gender=="f")
+male <- full %>% filter(gender=="m")
 
-## Create dimension table for unique artists
-uniqueartists <- x %>% select(artistid, artist) %>% unique() %>% as.data.frame() %>% filter(artistid != "")
-
+## Create dimension table for unique artists and unique users - these will be used for the Shiny UI
+unique_artists <- full %>% select(artistid, artist) %>% unique() %>% as.data.frame() %>% filter(artistid != "")
 unique_users <- unique(female$userid)
 
+# Preview of the important tables from this chunk
+glimpse(female)
+glimpse(unique_artists)
+glimpse(unique_users)
 ```
 
 # Wordcloud visualization and simple EDA for male and female
 
+The goal of this section is to create some basic visualizations to view the most played artists for males and females. This is used to visualize whether males and females have similar music preferences, and whether the recommendation engine should consider all users, or should view males and females as separate subsets with different preferences.
+
+The most popular artists by playcount are aggregated and ranked, and are plot as bar charts and wordclouds as a simple EDA exercise.
 ```{r}
-female.aggr <- aggregate(plays ~ artistid, female, sum)
+# Aggregation of top artists for female users
+# Ranking for artists is determined using rank(ties.method="first"), such that a tie in ranking results in both artist having the same lower rank - i.e. 1, 2,2,4,5)
+female.aggr <- aggregate(plays ~ artist, female, sum)
 female.aggr <- female.aggr[order(-female.aggr$plays),]
-female.aggr[,"female_rank"] <- rank(-female.aggr$plays, ties.method="first")
+female.aggr[,"female_rank"] <- rank(-female.aggr$plays, ties.method="min")
 
-
+# Aggregation of top artists for male users
 male.aggr <- aggregate(plays ~ artist, male, sum)
 male.aggr <- male.aggr[order(-male.aggr$plays),]
-male.aggr[,"male_rank"] <- rank(-male.aggr$plays, ties.method="first")
+male.aggr[,"male_rank"] <- rank(-male.aggr$plays, ties.method="min")
 
+# Wordclouds for males and females for top 30 artists
+color1 <- brewer.pal(8,"Dark2")
+plot.female <- wordcloud(female.aggr$artist, female.aggr$plays, max.words=30, scale=c(2,.1), colors=color1)
+plot.male <- wordcloud(male.aggr$artist, male.aggr$plays, max.words=30, scale=c(2,.1), colors=color1)
 
-plot.female <- wordcloud(female.aggr$artist, female.aggr$plays, max.words=100)
-plot.male <- wordcloud(male.aggr$artist, male.aggr$plays, max.words=100)
+# Bar plots showing Top 30 artists for Male and Female users
+barcolor = brewer.pal(3,"Blues")
+ggplot(head(z[,c("artist","plays.x")],30), aes(x = reorder(artist,plays.x), y=plays.x)) + geom_bar(stat="identity", fill="lightskyblue") + coord_flip() + ggtitle("Top Artists for Male Last.fm Users")
+ggplot(head(z[,c("artist","plays.y")],30), aes(x = reorder(artist,plays.y), y=plays.y)) + geom_bar(stat="identity", fill="violetred") + coord_flip() + ggtitle("Top Artists for Female Last.fm Users")
 
+# Show top 30 rankings for males and females merged together, showing rank difference for females vs males in terms of artist plays
 z <- merge(male.aggr, female.aggr, all.x=TRUE, all.y=TRUE, by.x="artist", by.y="artist")
-z <- z[order(-z$plays.x),]
-kable(head(z, 50))
+z <- z[order(-z$plays.y),]
+z$rank_diff <- z$female_rank - z$male_rank
+kable(head(z, 30))
 
-# As seen in the Top 50 artists, males and females have different tastes in music
+# Calculating the rank difference for the top 50 female artists. The value represents an approximation of how popuar the artist is for females compared to males
+mean(head(z$rank_diff,50), na.rm=TRUE)
+# [1] -246.06
 ```
 
 # User Based Collaborative Filter to create Recommender for female users (using only female users)
@@ -147,13 +188,13 @@ female.matrix[female.matrix == 0] <- NA
 # Transform into realRatingMatrix for recommenderlab
 female.real <- as(female.matrix,"realRatingMatrix")
 
-# Used first 1000 female users as training data
+# Used first 929 female users as training data (split of 70/30)
 # Method for normalization was centering instead of Z-score, may yield improvements with Z-score or other normalization
-# nn = 50 nearest neighbours can be hypertuned using cross-validation for better model in the future
-rec.model <-Recommender(female.real[1:1000], method = "UBCF", param=list(normalize = "center",method="Cosine",nn=50))
+# nn = 20 nearest neighbours can be hypertuned using cross-validation for better model in the future
+rec.model <-Recommender(female.real[1:929], method = "UBCF", param=list(normalize = "center",method="Cosine",nn=20))
  
 # Used remaining 1001-1328 users as test data
-as.data.frame(as(predict(rec.model, female.real[1001:1328], n=10), "list"))
+as.data.frame(as(predict(rec.model, female.real[930:1328], n=10), "list"))
 ```
 
 # Seeing if PCA can be used to reduce dimensionality
