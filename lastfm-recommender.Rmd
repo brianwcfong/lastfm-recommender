@@ -278,10 +278,10 @@ femaletop100.matrix[femaletop100.matrix == 0] <- NA
 
 femaletop100.real <- as(femaletop100.matrix,"realRatingMatrix")
 
-rec.model <-Recommender(femaletop100.real[1:1000], method = "IBCF")
+rec.model.top100 <-Recommender(femaletop100.real[1:1000], method = "IBCF")
 
-predict_user <- predict(rec.model, femaletop100.real[1001:1005], n=5)
+predict_user_top100 <- predict(rec.model.top100, femaletop100.real[1001:1005], n=5)
 
-as(predict_user,"list")
+as(predict_user_top100,"list")
 ```
 
