@@ -87,7 +87,8 @@ unique_users <- unique(female$userid)
 
 ```
 
-Wordcloud visualization for male and female
+# Wordcloud visualization and simple EDA for male and female
+
 ```{r}
 female.aggr <- aggregate(plays ~ artistid, female, sum)
 female.aggr <- female.aggr[order(-female.aggr$plays),]
@@ -105,10 +106,11 @@ plot.male <- wordcloud(male.aggr$artist, male.aggr$plays, max.words=100)
 z <- merge(male.aggr, female.aggr, all.x=TRUE, all.y=TRUE, by.x="artist", by.y="artist")
 z <- z[order(-z$plays.x),]
 kable(head(z, 50))
+
 # As seen in the Top 50 artists, males and females have different tastes in music
 ```
 
-# Attempt at Recommender with raw data for female users
+# User Based Collaborative Filter to create Recommender for female users (using only female users)
 ```{r}
 # Looking at number of female users and how many artists they listen to
 length(unique(female$userid))
@@ -145,77 +147,28 @@ female.matrix[female.matrix == 0] <- NA
 # Transform into realRatingMatrix for recommenderlab
 female.real <- as(female.matrix,"realRatingMatrix")
 
-## Normalize plays
-#female.real2 <- normalize(female.real, method="Z-score")
-
-rec.model <-Recommender(female.real, method = "UBCF", param=list(normalize = "center",method="Cosine",nn=50))
-
-as.data.frame(as(predict(rec.model, female.real["00000c289a1829a808ac09c00daf10bc3c4e223b",], n=10), "list"))
+# Used first 1000 female users as training data
+# Method for normalization was centering instead of Z-score, may yield improvements with Z-score or other normalization
+# nn = 50 nearest neighbours can be hypertuned using cross-validation for better model in the future
+rec.model <-Recommender(female.real[1:1000], method = "UBCF", param=list(normalize = "center",method="Cosine",nn=50))
+ 
+# Used remaining 1001-1328 users as test data
+as.data.frame(as(predict(rec.model, female.real[1001:1328], n=10), "list"))
 ```
 
-```{r}
-# Unique User ID List
-unique_users <- unique(playcount$userid)
+# Seeing if PCA can be used to reduce dimensionality
+Attempted to use Principal Component Analysis to reduce number of different artists into groups, but was not very effective overall.
 
-# Looking at number of plays users and how many artists they listen to
-length(unique(playcount$userid))
-# [1] 8875 unique plays users
-length(unique(playcount$artistid))
-# [1] 46551 unique artists
+Based on the plot, 10 PCs only explained about 60% of the total variance in the dataset, indicating that artists were not 
 
-# No. of rows with empty artistid, and remove them
-nrow(playcount[playcount$artistid == "",])
-# [1] 837
-playcount <- playcount %>% filter(artistid != "")
+As there were no genre or other artist tags within the Last.fm data, we are unable to deduce whether these PCs are a representation of the Genres or other categories of artists, or there are other segments of artists that can be used for better recommendations in the future.
 
-# No. of rows with empty artist, and remove them
-nrow(playcount[playcount$artist == "",])
-# [1] 5
-playcount <- playcount %>% filter(artist != "")
-
-# Transform data to user/artist matrix
-playcount.matrix <- acast(playcount, userid ~ artistid, fun.aggregate=sum, value.var="plays")
-# Double check if matrix has correct dimensions
-nrow(playcount.matrix)
-# [1] 1328 = total unique users
-ncol(playcount.matrix)
-# [1] 15089 = total unique artists
-
-sum(playcount$plays, na.rm=TRUE)
-# [1] 12783183 = total plays in dataframe
-sum(playcount.matrix, na.rm=TRUE)
-# [1] 12783183 = total plays in matrix
-
-# Transform into realRatingMatrix for recommenderlab
-playcount.real.matrix<- as(playcount.matrix,"realRatingMatrix")
-
-rec.model <-Recommender(playcount.real.matrix, method = "UBCF")
-
-predicted <- predict(rec.model, playcount.real.matrix[1,], n=5)
-as(predicted, "list")
-```
-
-```{r}
-
-```
-
-
-
-```{r}
-z <- aggregate(plays ~ userid, playcount, sum)
-z <- z[order(-plays),]
-
-z1 <- head(z, 500)
-z2 <- as.vector(z1$userid)
-
-```
-
-# Try using PCA to reduce dimensionality
+A better use would be to utilize artist's "Genre", "Decade" (e.g. 60s, 70s) or other tags available from MusicBrains/Last.fm as features to improve the recommendation engine instead of PCA.
 ```{r}
 # Change NAs to 0 in matrix
 female.matrix[is.na(female.matrix)] <- 0
 
-# Find and remove zero variance columns
+# Find and remove zero variance columns, as PCA does not work if columns are entirely zero variance
 which(apply(female.matrix, 2, var)==0)
 female.matrix <- female.matrix[ , apply(female.matrix, 2, var) != 0]
 
@@ -223,11 +176,19 @@ female.matrix <- female.matrix[ , apply(female.matrix, 2, var) != 0]
 female.pca <- prcomp(female.matrix, center = TRUE, scale = TRUE)
 plot(female.pca, type="l")
 
+# Biplot to view direction of principal components
+# Biplot was attempted but it does not yield much information about the PCs that is useful at this point
+#biplot(female.pca, scale = 0)
+
 ```
 
 # Item based Collaborative Filtering
+An attempt was made to use Item Based Collaborative Filtering for a recommendation engine. However, performance was much worse without significant improvement to the recommendations, due to the size of the matrix required for cosine similarity between 15,000+ artists.
+
+The top 100 artists for females was used in this version below (100x100 matrix for cosine similarity) as a proof of concept. However, User-based seems to be more effective.
 ```{r}
-library(lsa)
+#library(lsa)
+# Library for cosine similarity calculation, was not used for the final IBCF
 
 # Try top 100 female artists only for performance
 top100 <- female.aggr %>% filter(female_rank <= 100) %>% select(artistid)
@@ -243,12 +204,12 @@ femaletop100.matrix <- acast(femaletop100, userid ~ artistid, fun.aggregate=sum,
 # Convert NAs to zero
 femaletop100.matrix[femaletop100.matrix == 0] <- NA
 
-# Artist Cosine Similarity (Item-based)
+# Artist Cosine Similarity (Item-based); cosine function from lsa package
 #artist_sim <- cosine(femaletop100.matrix)
 
 femaletop100.real <- as(femaletop100.matrix,"realRatingMatrix")
 
-rec.model <-Recommender(femaletop100.real[1:1000], method = "UBCF")
+rec.model <-Recommender(femaletop100.real[1:1000], method = "IBCF")
 
 predict_user <- predict(rec.model, femaletop100.real[1001:nrow(femaletop100.matrix)], n=5)
 
