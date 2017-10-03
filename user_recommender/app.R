@@ -24,7 +24,9 @@ ui <- fluidPage(
       
       # Show a plot of the generated distribution
       mainPanel(
-         tableOutput('xtable')
+        tableOutput('usertable'),
+        tableOutput('xtable')
+         
       )
    )
 )
@@ -33,14 +35,23 @@ ui <- fluidPage(
 server <- function(input, output) {
    
    output$xtable <- renderTable({
-      # generate bins based on input$bins from ui.R
+      # Generate list of 10 recommended artists
       x <- predict(rec.model,female.real[input$select_userid,],n=10)
       
       x2 <- as.data.frame(as(x,"list"))
       colnames(x2) <- "artistid"
-      x2 <- merge(x2,uniqueartists, all.x=TRUE,by.x="artistid", by.y="artistid")
-      
-   })
+      x2 <- merge(x2,unique_artists, all.x=TRUE,by.x="artistid", by.y="artistid")
+      x2$artistid <- NULL
+      as.data.frame(x2)
+   }
+   ,caption = "Recommended Artists")
+   
+   # Generate list of most listened to artists for user
+   output$usertable <- renderTable({
+     x <- female %>% filter(userid == input$select_userid) %>% select(artist,plays) %>% head(10)
+     x[order(-x$plays),]
+   }
+   ,caption = "Most listened artists by Play Count")
 }
 
 # Run the application 

@@ -50,6 +50,8 @@ SELECT COUNT(DISTINCT uid)
 ```
 
 # Libraries for R
+
+These libraries are required for parts 2 and 3 (only dplyr and lubridate are required for Part 2)
 ```{r message=FALSE, warning=FALSE}
 library(dplyr)
 library(lubridate)
@@ -68,7 +70,8 @@ Count the total data transfer (namely the sum of the file size of individual req
 
 R was used for this example, and the data from the PDF was used for "logfile.txt"
 ```{r Raw Data Analytics}
-
+# library(dplyr)
+# library(lubridate)
 
 df <- read.table("./logfile.txt", sep="\t", header=TRUE, stringsAsFactors = FALSE)
 df$date <- ymd(df$date)
@@ -83,7 +86,10 @@ A recommendation engine was created in R for the Last.fm 360k dataset, featuring
 
 The goal of this recommendation engine is to recommend similar artists to users, based on their existing artist preferences - this is estimated by observing the number of plays each user has for each artist. Only the female users were considered for this recommendation engine to limit the scope of the engine, and because the listening preferences of males and females differ significantly in this dataset.
 
-To run this recommendation engine code, please run all chunks below in the current file "lastfm-recommender.Rmd" in RStudio to execute the recommendation engine (User Based Collaborative Filtering), and then run the Shiny app.R found in the "user_recommender" folder for a rough prototype of the UI of the recommender.
+# Environment Setup
+To run this recommendation engine code, please run all chunks below in the current file "lastfm-recommender.Rmd" in RStudio, cloned from the Github repo. The last.fm data file (lastfm-dataset-360K/usersha1-profile.tsv, lastfm-dataset-360K/usersha1-artmbid-artname-plays.tsv) should be placed in the root of the repo. Additionally, the R packages above should be installed to execute the R script.
+
+This executes the recommendation engine (User Based Collaborative Filtering), and then run the Shiny app.R found in the "user_recommender" folder for a rough prototype of the UI of the recommender.
 
 # Loading data from Last.fm dataset
 Load TSV files from http://www.dtic.upf.edu/~ocelma/MusicRecommendationDataset/lastfm-360K.html, placed in the root of this git project
@@ -135,19 +141,19 @@ color1 <- brewer.pal(8,"Dark2")
 plot.female <- wordcloud(female.aggr$artist, female.aggr$plays, max.words=30, scale=c(2,.1), colors=color1)
 plot.male <- wordcloud(male.aggr$artist, male.aggr$plays, max.words=30, scale=c(2,.1), colors=color1)
 
+# Show top 30 rankings for males and females merged together, showing rank difference for females vs males in terms of artist plays
+full.aggr <- merge(male.aggr, female.aggr, all.x=TRUE, all.y=TRUE, by.x="artist", by.y="artist")
+full.aggr <- full.aggr[order(-full.aggr$plays.y),]
+full.aggr$rank_diff <- full.aggr$female_rank - full.aggr$male_rank
+kable(head(full.aggr, 30))
+
 # Bar plots showing Top 30 artists for Male and Female users
 barcolor = brewer.pal(3,"Blues")
-ggplot(head(z[,c("artist","plays.x")],30), aes(x = reorder(artist,plays.x), y=plays.x)) + geom_bar(stat="identity", fill="lightskyblue") + coord_flip() + ggtitle("Top Artists for Male Last.fm Users")
-ggplot(head(z[,c("artist","plays.y")],30), aes(x = reorder(artist,plays.y), y=plays.y)) + geom_bar(stat="identity", fill="violetred") + coord_flip() + ggtitle("Top Artists for Female Last.fm Users")
-
-# Show top 30 rankings for males and females merged together, showing rank difference for females vs males in terms of artist plays
-z <- merge(male.aggr, female.aggr, all.x=TRUE, all.y=TRUE, by.x="artist", by.y="artist")
-z <- z[order(-z$plays.y),]
-z$rank_diff <- z$female_rank - z$male_rank
-kable(head(z, 30))
+ggplot(head(full.aggr[,c("artist","plays.x")],30), aes(x = reorder(artist,plays.x), y=plays.x)) + geom_bar(stat="identity", fill="lightskyblue") + coord_flip() + ggtitle("Top Artists for Male Last.fm Users")
+ggplot(head(full.aggr[,c("artist","plays.y")],30), aes(x = reorder(artist,plays.y), y=plays.y)) + geom_bar(stat="identity", fill="violetred") + coord_flip() + ggtitle("Top Artists for Female Last.fm Users")
 
 # Calculating the rank difference for the top 50 female artists. The value represents an approximation of how popuar the artist is for females compared to males
-mean(head(z$rank_diff,50), na.rm=TRUE)
+mean(head(full.aggr$rank_diff,50), na.rm=TRUE)
 # [1] -246.06
 ```
 
@@ -193,9 +199,31 @@ female.real <- as(female.matrix,"realRatingMatrix")
 # nn = 20 nearest neighbours can be hypertuned using cross-validation for better model in the future
 rec.model <-Recommender(female.real[1:929], method = "UBCF", param=list(normalize = "center",method="Cosine",nn=20))
  
-# Used remaining 1001-1328 users as test data
-as.data.frame(as(predict(rec.model, female.real[930:1328], n=10), "list"))
+# Used remaining users 930-1328 as test data
+as(predict(rec.model, female.real[930], n=10), "list")
+# Recommendations can be done for users 930-1328
 ```
+
+# Shiny App
+After running "rec.model", the Shiny App located in ./user_recommender/app.R can be run. The app is a mock-up of a user's Last.fm profile, featuring their top played artists (by play count), as well as a list of top 10 recommended artists based on the rec.model (UBCF). The Shiny app will generate top 10 played artists and top 10 recommended artists for the selected user.
+
+# System Design Limitations
+The system is based on a database of user profiles and artist play counts. As there is limited detail on the time scale (when each artist was played, time series trends on when each artist was played), as well as no information on number of songs/which songs played, the level of recommendation is limited by the current dataset.
+
+# Future Enhancements 
+For a more enhanced model, individual songs can be recommended as well. However, the UBCF model will be much larger/more expensive due to the number of songs available per artist. For this model, it is recommended to use the "POPULAR" setting to only recommend the most popular songs for each artist (based on number of plays per song)
+
+# Concerns if system is put into production
+- Due to the large number of different artists on Last.fm, including genres, languages, types of music (vocal, instrumental, classical, soundtrack, or non-music such as podcasts, comedy albums), it becomes hard to recommend items based solely on UBCF or IBCF. There needs to be a more robust and less expensive method than to create a massive matrix. It is suggested to cluster and segment users based on their age, country, genres and other demographics/behavior to create micro-segments and run UBCF on the micro-clusters.
+
+- One of the challenges is to verify the accuracy of the recommendations made by the user. There needed to be feedback at production to indicate whether the user selects the recommended artists (clickthrough/artist page views?), as well as number of plays for each of the recommended artists. The best tracking is if a system that tracks skipped songs/songs that are not played to x% (e.g. 60%) completion, suggesting the user does not like the recommended song/artist. These systems are implemented by YouTube, Spotify, etc. to gauge user interest in the song/video.
+
+- There should be enhancements to the system that take into account the recency of the plays/artists (Last.fm already implements this with its "Top Played This Month", "Top Played Today" etc.) in addition to the frequency of plays. This makes it easier for the system to recommend songs/artists for the user, as user tastes/interest change quickly. However, it is a challenge to not overfit for this data and only make the recommendations based on the most recent plays. Spotify's algorithm runs into this issue with its "Discover Weekly" playlist recommending songs based on recent plays - it overfits and will recommend entire playlists of soundtrack songs if the user recently plays many soundtrack songs (even if the songs are not played in their entirety, or the same soundtrack(s) are looped). Therefore, the system should take into account genre or language or other factors. Ideally, the user would receive multiple lists of recommendations based on set macro-genres (e.g. "I want recommendations for Pop, based on my history" or "I want recommendations for Mandarin songs based on my play history"), or the user would be able to subscribe to certain genres to reduce the computational cost for each user's lists.
+
+
+
+
+## Additional tested content for Question 3
 
 # Seeing if PCA can be used to reduce dimensionality
 Attempted to use Principal Component Analysis to reduce number of different artists into groups, but was not very effective overall.
