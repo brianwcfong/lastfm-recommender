@@ -260,15 +260,15 @@ The top 100 artists for females was used in this version below (100x100 matrix f
 # Library for cosine similarity calculation, was not used for the final IBCF
 
 # Try top 100 female artists only for performance
-top100 <- female.aggr %>% filter(female_rank <= 100) %>% select(artistid)
+top100 <- female.aggr %>% filter(female_rank <= 100) %>% select(artist)
 top100 <- as.vector(top100[,1])
 
 # Keep only rows with artistid in top100
-femaletop100 <- female %>% filter(artistid %in% top100)
-femaletop100 <- femaletop100 %>% filter(artistid != "")
+femaletop100 <- female %>% filter(artist %in% top100)
+femaletop100 <- femaletop100 %>% filter(artist != "")
 
 #
-femaletop100.matrix <- acast(femaletop100, userid ~ artistid, fun.aggregate=sum, value.var="plays")
+femaletop100.matrix <- acast(femaletop100, userid ~ artist, fun.aggregate=sum, value.var="plays")
 
 # Convert NAs to zero
 femaletop100.matrix[femaletop100.matrix == 0] <- NA
@@ -280,7 +280,7 @@ femaletop100.real <- as(femaletop100.matrix,"realRatingMatrix")
 
 rec.model <-Recommender(femaletop100.real[1:1000], method = "IBCF")
 
-predict_user <- predict(rec.model, femaletop100.real[1001:nrow(femaletop100.matrix)], n=5)
+predict_user <- predict(rec.model, femaletop100.real[1001:1005], n=5)
 
 as(predict_user,"list")
 ```
